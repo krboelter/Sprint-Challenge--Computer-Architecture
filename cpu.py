@@ -10,7 +10,7 @@ class CPU:
         self.ram = [0] * 256
         self.reg = [0] * 8
         self.pc = 0
-        self.flags = 0b00000000
+        self.flags = [0] * 8
         self.looping = False
         self.file = sys.argv
         self.sp = 6
@@ -18,6 +18,7 @@ class CPU:
             'HLT': 0b00000001,
             'LDI': 0b10000010,
             'PRN': 0b01000111,
+            'ADD': 0b10100000,
             'MUL': 0b10100010,
             'PUSH': 0b01000101,
             'POP': 0b01000110,
@@ -25,6 +26,8 @@ class CPU:
             'JMP': 0b01010100,
             'JEQ': 0b01010101,
             'JNE': 0b01010110,
+            'CALL': 0b01010000,
+            'RET': 0b00010001,
         }
 
     def load(self, program=[]):
@@ -57,22 +60,23 @@ class CPU:
 
     def alu(self, op, reg_a, reg_b):
         """ALU operations."""
-
-        # if op == self.instruction_set['ADD']:
-        #     self.reg[reg_a] += self.reg[reg_b]
-        if op == self.instruction_set['MUL']:
+        if op == self.instruction_set['ADD']:
+            new_val = self.reg[reg_a] + self.reg[reg_b]
+            self.reg[reg_a] = new_val
+            self.pc += 3
+        elif op == self.instruction_set['MUL']:
             new_val = self.reg[reg_a] * self.reg[reg_b]
             self.reg[reg_a] = new_val
             self.pc += 3
         elif op == self.instruction_set['CMP']:
             if reg_a == reg_b:
-                self.flags = 0b00000001
+                self.flags = 0b00000001 # set e flag
             elif reg_a > reg_b:
-                self.flags = 0b00000010
+                self.flags = 0b00000010 # set g flag
             elif reg_a < reg_b:
-                self.flags = 0b00000100
+                self.flags = 0b00000100 # set l flag
 
-            self.pc += 2
+            self.pc += 3
         else:
             raise Exception("Unsupported ALU operation")
 
@@ -104,41 +108,69 @@ class CPU:
         while self.looping:
             instruction_register = self.ram_read(self.pc)
             is_alu = instruction_register >> 5 & 0b1
-            operand_a = self.ram_read(self.pc + 1)
-            operand_b = self.ram_read(self.pc + 2)
             num_operands = instruction_register >> 6
+            operand_a = self.ram_read(self.pc + 1)
+
+            if num_operands == 2:
+                operand_b = self.ram_read(self.pc + 2)
+            # self.trace()
 
             if is_alu == 1: # if 1, needs to pass through the alu
-                self.alu(instruction_register, operand_a, operand_b)
+                self.alu(instruction_register, self.reg[operand_a], self.reg[operand_b])
 
-            if instruction_register == self.instruction_set['HLT']:
+            elif instruction_register == self.instruction_set['HLT']:
                 self.looping = False
 
-            if instruction_register == self.instruction_set['LDI']:
+            elif instruction_register == self.instruction_set['LDI']:
                 self.reg[operand_a] = operand_b
                 self.pc += 3
 
-            if instruction_register == self.instruction_set['PRN']:
+            elif instruction_register == self.instruction_set['PRN']:
                 print(self.reg[operand_a])
                 self.pc += 2
 
-            if instruction_register == self.instruction_set['PUSH']:
+            elif instruction_register == self.instruction_set['PUSH']:
                 val_in_reg = self.reg[operand_a]
                 self.reg[self.sp] -= 1
                 self.ram_write(self.reg[self.sp], val_in_reg)
                 self.pc += 2
 
-            if instruction_register == self.instruction_set['POP']:
+            elif instruction_register == self.instruction_set['POP']:
                 val_from_ram = self.ram_read(self.reg[self.sp])
                 self.reg[operand_a] = val_from_ram
                 self.reg[self.sp] += 1
                 self.pc += 2
 
-            if instruction_register == self.instruction_set['JMP']:
-                self.pc = operand_a
+            elif instruction_register == self.instruction_set['CALL']:
+                given_register = self.reg[operand_a]
+                self.sp -= 1
+                return_address = self.pc + 2
+                new_address = self.reg[self.sp]
+                self.ram[new_address] = return_address
+                self.pc = given_register
 
-            if instruction_register == self.instruction_set['JEQ']:
-                pass
+            elif instruction_register == self.instruction_set['RET']:
+                new_address = self.reg[self.sp]
+                return_address = self.ram[new_address]
+                self.reg[self.sp] += 1
+                self.pc = return_address
 
-            if instruction_register == self.instruction_set['JNE']:
-                pass
+            elif instruction_register == self.instruction_set['JMP']:
+                self.pc = self.reg[operand_a]
+
+            elif instruction_register == self.instruction_set['JEQ']:
+                flg = self.flags & 0b00000001 # 1
+                if flg == 1: # are equal
+                    self.pc = self.reg[operand_a]
+                else:
+                    self.pc += 2
+
+            elif instruction_register == self.instruction_set['JNE']:
+                flg = self.flags & 0b00000001 # 0
+                if flg == 0: # not equal
+                    self.pc = self.reg[operand_a]
+                else:
+                    self.pc += 2
+
+            else:
+                print(f"Unknown instuction {instruction_register} at {self.pc}")
